@@ -1,0 +1,9 @@
+<launch>
+
+  <!-- autorace node -->
+  <node pkg="autorace_core_moryachki" type="cross_node" name="cross_node" output="screen">
+    <!-- <remap from="/control/cmd_vel" to="/cmd_vel" /> -->
+    <remap from="/control/lane" to="/detect/lane" />
+  </node>
+
+</launch>

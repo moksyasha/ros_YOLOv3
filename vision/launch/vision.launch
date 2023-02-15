@@ -1,0 +1,5 @@
+<launch>
+  <!-- comp vision -->
+  <node pkg="vision" type="vision" name="vision" output="screen"> </node>
+  
+</launch>

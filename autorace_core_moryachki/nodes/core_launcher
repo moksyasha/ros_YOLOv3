@@ -1,0 +1,112 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+# Authors: moksyasha
+
+import rospy, roslaunch
+import os
+from std_msgs.msg import Int8
+ 
+class Launcher():
+    def __init__(self):
+        self.launch_path = os.path.dirname(os.path.realpath(__file__))
+        self.launch_path = self.launch_path.replace('/nodes', '/launch')
+
+        # get id of node for launch/shutdown
+        self.cross = rospy.Subscriber('/launch_id', Int8, self.cbGotId, queue_size=1)
+
+        self.uuid = roslaunch.rlutil.get_or_generate_uuid(None, False)
+        roslaunch.configure_logging(self.uuid)
+
+        self.current_id = 0
+        self.cross_launched = False
+        self.park_launched = False
+        self.constr_launched = False
+        self.tunnel_launched = False
+        self.is_triggered = False
+
+        loop_rate = rospy.Rate(10) # 10hz
+        while not rospy.is_shutdown():
+            if self.is_triggered == True:
+                self.fnControlNode()
+                self.is_triggered = False
+            loop_rate.sleep()
+
+
+    def cbGotId(self, mode_msg):
+        rospy.loginfo("got id %d", mode_msg.data)
+        self.current_id = mode_msg.data
+        self.is_triggered = True
+
+
+    def fnControlNode(self):
+        if self.current_id == 1:
+            self.fnLaunch(self.current_id, self.cross_launched)
+        elif self.current_id == 2:
+            self.fnLaunch(self.current_id, self.park_launched)
+        elif self.current_id == 3:
+            self.fnLaunch(self.current_id, self.constr_launched)
+        elif self.current_id == 4:
+            self.fnLaunch(self.current_id, self.tunnel_launched)
+
+
+    def fnLaunch(self, launch_num, is_start):
+        
+        if launch_num == 1:
+            if is_start == False:
+                self.current_id = 0
+                self.launch_cross = roslaunch.scriptapi.ROSLaunch()
+                self.launch_cross = roslaunch.parent.ROSLaunchParent(self.uuid, [self.launch_path + "/cross_node.launch"])
+                self.launch_cross.start()
+                rospy.loginfo("cross launched")
+                self.cross_launched = True
+            else:
+                rospy.loginfo("cross closed")
+                self.cross_launched = False
+                self.launch_cross.shutdown()
+        elif launch_num == 2:
+            if is_start == False:
+                self.current_id = 0
+                self.launch_park = roslaunch.scriptapi.ROSLaunch()
+                self.launch_park = roslaunch.parent.ROSLaunchParent(self.uuid, [self.launch_path + "/park_node.launch"])
+                self.launch_park.start()
+                rospy.loginfo("park launched")
+                self.park_launched = True
+            else:
+                rospy.loginfo("park closed")
+                self.park_launched = False
+                self.launch_park.shutdown()
+        elif launch_num == 3:
+            if is_start == False:
+                self.current_id = 0
+                self.launch_constr = roslaunch.scriptapi.ROSLaunch()
+                self.launch_constr = roslaunch.parent.ROSLaunchParent(self.uuid, [self.launch_path + "/turtlebot3_autorace_constr.launch"])
+                self.launch_constr.start()
+                rospy.loginfo("constr launched")
+                self.constr_launched = True
+            else:
+                rospy.loginfo("constr closed")
+                self.constr_launched = False
+                self.launch_constr.shutdown()
+        elif launch_num == 4:
+            if is_start == False:
+                self.current_id = 0
+                self.launch_tunnel = roslaunch.scriptapi.ROSLaunch()
+                self.launch_tunnel = roslaunch.parent.ROSLaunchParent(self.uuid, [self.launch_path + "/turtlebot3_autorace_tunnel.launch"])
+                self.launch_tunnel.start()
+                rospy.loginfo("tunnel launched")
+                self.constr_launched = True
+            else:
+                rospy.loginfo("tunnel closed")
+                self.tunnel_launched = False
+                self.launch_tunnel.shutdown()    
+        
+
+
+    def main(self):
+        rospy.spin()
+
+if __name__ == '__main__':
+    rospy.init_node('core_launcher')
+    node = Launcher()
+    node.main()

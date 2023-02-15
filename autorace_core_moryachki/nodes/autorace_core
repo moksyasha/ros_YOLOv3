@@ -1,0 +1,156 @@
+#!/usr/bin/env python
+# Author: moks
+
+import rospy
+import numpy as np
+from geometry_msgs.msg import Twist
+from std_msgs.msg import Int8
+from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Empty
+from std_msgs.msg import String
+
+
+class Core():
+
+    def __init__(self):
+
+        self.unique_sub = rospy.Subscriber('/yolo_unique', Int8, self.cbGetUnique, queue_size = 1)
+        self.sub_laser = rospy.Subscriber('/scan', LaserScan, self.cbLaser, queue_size = 1)
+
+        self.start_sub = rospy.Subscriber('/robot_start', Empty, self.cbGetStartMsg, queue_size = 1)
+        self.pub_finish = rospy.Publisher('/robot_finish', String, queue_size = 1)
+        self.manager_control = rospy.Publisher('/manager_control', Int8, queue_size = 1)
+        self.manager_cross = rospy.Publisher('/manager_cross', Int8, queue_size = 1)
+        self.manager_park = rospy.Publisher('/manager_park', Int8, queue_size = 1)
+        self.pub_node_id = rospy.Publisher('/launch_id', Int8, queue_size = 1)
+        self.pub_cmd_vel = rospy.Publisher('/cmd_vel', Twist, queue_size = 1)
+
+        self.unique = 0
+        self.twist = Twist()
+        
+        self.start = 0
+        self.classes = ["cons", "cross", "green", "left", "park", "red", "right", "shlak", "stop", "stop_cross", "tunnel", "yell"]
+        self.classes_bin = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        self.start_node_cross = 1
+        self.start_node_park = 0
+
+
+    def cbGetStartMsg(self, max_vel_msg):
+        self.start = 1
+
+
+    def publish_finish(self):
+        self.pub_finish.publish("Finished")
+
+
+    def cbGetUnique(self, unique_msg):
+        self.unique = unique_msg.data
+        
+        rospy.loginfo("=== Got unique: {}".format(self.classes[self.unique]))
+        if self.unique == 2:
+            self.start = 1
+            self.classes_bin[self.unique] = 1
+            self.manager_control.publish(1)
+            return
+
+        if self.unique == 9:
+            rospy.loginfo("Stop_cross received")
+            self.pub_node_id.publish(1)
+            self.start = 1
+            self.manager_control.publish(1)
+            return
+
+        self.classes_bin[self.unique] = 1
+
+
+    def cbLaser(self, laser_msg):
+
+        if self.start:
+
+            if self.classes_bin[7] == 1:
+                self.classes_bin[7] = 0
+                twist = Twist()
+                self.pub_cmd_vel.publish(twist)
+                self.manager_control.publish(0)
+                rospy.sleep(10)
+                self.manager_control.publish(1)
+                return
+
+            if self.classes_bin[1] == 1:
+                self.classes_bin[1] = 2
+                rospy.loginfo("Cross received")
+                self.pub_node_id.publish(1)
+                return
+
+            if self.classes_bin[4] == 1:
+                self.classes_bin[4] = 2
+                rospy.loginfo("Park received")
+                self.manager_control.publish(1)
+                self.pub_node_id.publish(3)
+                self.pub_node_id.publish(2)
+                return
+
+            if self.classes_bin[0]:
+                ranges = laser_msg.ranges[280:295]
+                if min(ranges) < 0.2:
+                    self.classes_bin[0] = 0
+                    self.pub_node_id.publish(3)
+                    self.manager_control.publish(0)
+                    twist = Twist()
+                    self.pub_cmd_vel.publish(twist) 
+                    rospy.loginfo("Constr received")
+                    return
+
+            if self.classes_bin[1]:
+                ranges = laser_msg.ranges[:20] + laser_msg.ranges[-6:]
+                if min(ranges) < 0.5:
+                    if self.classes_bin[3]: # if left sign
+                        rospy.loginfo("Left received")
+                        self.start = 0
+
+                        self.manager_control.publish(0) # control node off
+
+                        # 1 - left turn, -1 - right
+                        self.manager_cross.publish(1)   # cross node on
+                        self.classes_bin[1] = 0
+                        return
+                    else:
+                        rospy.loginfo("Right received")
+                        self.classes_bin[1] = 0    
+                        return
+
+
+            if self.classes_bin[10]:
+                ranges = laser_msg.ranges[60:70]
+                if min(ranges) < 0.2:
+                    rospy.loginfo("Tunnel started")
+                    self.classes_bin[10] = 0
+                    self.manager_control.publish(0) # control node off
+                    twist = Twist()
+                    self.twist.linear.x = 0.2
+                    self.twist.angular.z = 0
+                    self.pub_cmd_vel.publish(twist)
+                    self.start = 0
+                    self.pub_node_id.publish(4)
+                    return
+
+            if self.classes_bin[4]:
+                ranges = laser_msg.ranges[280:295]
+                if min(ranges) < 0.4:
+                    rospy.loginfo("Park started")
+                    self.classes_bin[4] = 0
+                    self.manager_control.publish(0) # control node off
+                    self.start = 0
+                    self.manager_park.publish(1)
+                    return
+
+            return
+
+    def main(self):
+        rospy.spin()
+
+
+if __name__ == '__main__':
+    rospy.init_node('autorace_core')
+    node = Core()
+    node.main()

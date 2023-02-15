@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+# Author: moks
+
+import rospy
+import numpy as np
+import cv2 as cv
+import torch
+import os
+from sensor_msgs.msg import Image
+from std_msgs.msg import Int8
+import pytorchyolo.detect_yolo as detect
+import pytorchyolo.models_yolo as models
+
+from cv_bridge import CvBridge
+bridge = CvBridge()
+
+class VisionClass():
+    def __init__(self):
+        self.ros_package_path = os.path.dirname(os.path.realpath(__file__))
+        cfg_path = self.ros_package_path.replace('/nodes', '/yolov3.cfg')
+        w_path = self.ros_package_path.replace('/nodes', '/yolov3_370.pth')
+        #cfg_path = "/home/moksyasha/catkin_ws/src/main_ros/vision/yolov3.cfg"
+        #w_path = "/home/moksyasha/catkin_ws/src/main_ros/vision/yolov3_370.pth"
+        self.model = models.load_model(cfg_path, w_path)
+        self.classes = ["cons", "cross", "green", "left", "park", "red", "right", "shlak", "stop", "stop_cross", "tunnel", "yell"]
+        self.classes_bin = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        #self.yolo = torch.hub.load('/home/moksyasha/catkin_ws/src/main_ros/vision/', 'custom', path='/home/moksyasha/catkin_ws/src/main_ros/vision/best.pt', source='local')
+        #self.yolo.eval()
+
+        self.photo = rospy.Subscriber("/camera/image", Image, self.cbSaveImage)
+        self.image_pub = rospy.Publisher("/yolo", Image, queue_size=1)
+        self.detect_unique = rospy.Publisher("/yolo_unique", Int8, queue_size=1)
+        #self.photo_pub = rospy.Subscriber("/camera/image", Image, self.cbSaveImage)
+
+    def cbSaveImage(self, msg):
+        
+        img = bridge.imgmsg_to_cv2(msg, "bgr8")
+
+        #img = cv.cvtColor(img, cv.COLOR_BGR2RGB)
+        img = cv.cvtColor(img, cv.COLOR_BGR2RGB)
+        boxes = detect.detect_image(self.model, img)
+
+        # with torch.no_grad():
+        #     results = self.yolo(img)
+        if boxes.size > 0:
+        # labels, cord_thres = results.xyxyn[0][:, -1].cpu().numpy(), results.xyxyn[0][:, :-1].cpu().numpy()
+            for bbox in boxes:
+                color = (5, 5, 55)
+                name_class = self.classes[int(bbox[5])]
+                if (int(bbox[5]) == 10): self.classes_bin[2] = 1
+                if self.classes_bin[int(bbox[5])]:
+                    self.detect_unique.publish(int(bbox[5]))
+                    self.classes_bin[int(bbox[5])] = 0
+                #rospy.loginfo("YOLO:{} // {}".format(name_class, int(bbox[4]*100)))
+                start_point = tuple([int(bbox[0]), int(bbox[1])])
+                end_point = tuple([int(bbox[2]), int(bbox[3])])
+                img = cv.rectangle(img, start_point, end_point, color, 4)
+                cv.putText(img, name_class, (int(bbox[0]), int(bbox[3])-10), cv.FONT_HERSHEY_COMPLEX, 1, color=(0, 0, 255), thickness=5)
+        self.image_pub.publish(bridge.cv2_to_imgmsg(img, "rgb8"))
+
+    def main(self):
+        rospy.spin()
+
+
+if __name__ == '__main__':
+    rospy.init_node('vision_node')
+    node = VisionClass()
+    node.main()

@@ -1,0 +1,18 @@
+<launch>
+
+  <!-- autorace node -->
+  <node pkg="autorace_core_moryachki" type="autorace_core" name="autorace_core" output="screen">
+    <remap from="/control/cmd_vel" to="/cmd_vel" />
+    <!-- <remap from="/control/lane" to="/detect/lane" />
+    <remap from="/control/cmd_vel" to="/cmd_vel" /> -->
+  </node>
+
+  <include file="$(find camera)/launch/intrinsic_camera_calibration.launch" />
+  <include file="$(find camera)/launch/extrinsic_camera_calibration.launch" />
+  <include file="$(find detect)/launch/detect_lane.launch" />
+  <include file="$(find driving)/launch/turtlebot3_autorace_control_lane.launch" /> 
+  <include file="$(find vision)/launch/vision.launch" />
+
+  <node pkg="autorace_core_moryachki" type="core_launcher" name="core_launcher" output="screen" />
+
+</launch>

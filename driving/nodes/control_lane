@@ -1,0 +1,191 @@
+#!/usr/bin/env python
+# Author: moks
+
+import rospy
+
+from std_msgs.msg import Float64
+from geometry_msgs.msg import Twist
+from std_msgs.msg import Int8
+#from nav_msgs.msg import Odometry
+# from sensor_msgs.msg import LaserScan
+# from sensor_msgs.msg import Image
+
+# from cv_bridge import CvBridge
+# bridge = CvBridge()
+#from dynamic_reconfigure.server import Server
+#from driving.cfg import DynamicConfig
+
+class ControlLane():
+    def __init__(self):
+        self.sub_lane = rospy.Subscriber('/control/lane', Float64, self.cbFollowLane, queue_size = 1)
+        #self.sub_laser = rospy.Subscriber('/scan', LaserScan, self.cbLaser, queue_size = 1)
+        self.sub_max_vel = rospy.Subscriber('/control/max_vel', Float64, self.cbGetMaxVel, queue_size = 1)
+        self.is_pub_cmd = rospy.Subscriber('/manager_control', Int8, self.cbIsPubCmd, queue_size = 1)
+        self.pub_cmd_vel = rospy.Publisher('/cmd_vel', Twist, queue_size = 1)
+
+        #self.pub_cmd_vel = rospy.Publisher('/control/cmd_vel', Twist, queue_size = 1)
+
+        #self.photo = rospy.Subscriber("/camera/image", Image, self.cbSaveImage)
+        #self.odom_sub = rospy.Subscriber('/odom', Odometry, self.cbOdom)
+        #self.last_photo = 0
+        #self.ph = rospy.get_time() - s116
+        #self.time = rospy.Publisher('/time', Float64, queue_size = 1)
+        #srv = Server(DynamicConfig, self.cbDynamic)
+        self.lastError = 0
+        self.last_time = rospy.get_time()
+        self.twist = Twist()
+        self.past_integral = 0.0
+        self.max_speed = 0.420
+        self.second_speed = 0.228
+        self.is_pub = 0
+        #self.ki_angle = 0.0007
+        #self.kp_angle = 0.01
+        #self.kd_angle = 0.0008
+        self.ki_angle = 0.0007
+        self.kp_angle = 0.01
+        self.kd_angle = 0.001
+        self.inter = 0
+        rospy.on_shutdown(self.fnShutDown)
+
+
+    # def cbOdom(self, odom_msg):
+    #     msg = "x: {}; y: {} z: {}".format(round(odom_msg.pose.pose.orientation.x, 1), round(odom_msg.pose.pose.orientation.y, 1), round(odom_msg.pose.pose.orientation.z, 1))
+    #     print(msg)
+
+    # def cbLaser(self, laser_msg):
+    #     if laser_msg.ranges[0] < 0.1:
+    #         self.start = 0
+    #         self.publish_finish()
+    
+
+    def cbIsPubCmd(self, pub_msg):
+        rospy.loginfo("control")
+        if pub_msg.data == 1:
+            rospy.loginfo("control on 1")
+            self.is_pub = pub_msg.data
+            self.lastError = 0
+            self.last_time = rospy.get_time()
+            self.twist = Twist()
+            self.past_integral = 0.0
+            self.second_speed = 0.228
+        elif pub_msg.data == 2:
+            rospy.loginfo("control on 2")
+            self.is_pub = pub_msg.data
+            self.lastError = 0
+            self.last_time = rospy.get_time()
+            self.twist = Twist()
+            self.past_integral = 0.0
+            self.second_speed = 0.2
+            #twist.linear.x = 0
+            #twist.angular.x = 0
+            #self.pub_cmd_vel.publish(twist)
+        else:
+            rospy.loginfo("control off")
+            self.is_pub = pub_msg.data
+            twist = Twist()
+
+    def cbGetMaxVel(self, max_vel_msg):
+        self.max_speed = max_vel_msg.data
+
+    # def cbSaveImage(self, msg):
+    #     self.ph = rospy.get_time() - 116
+    #     if np.floor(self.ph) != self.last_photo: 
+    #         rospy.loginfo("Ssaved: %i", self.last_photo)
+    #         # Convert your ROS Image message to OpenCV2
+    #         cv2_img = bridge.imgmsg_to_cv2(msg, "bgr8")
+    #         cv2_img = cv.resize(cv2_img, (320, 320), interpolation = cv.INTER_AREA)
+    #         name = str(int(self.last_photo)) + "_lights3.jpeg"
+    #         cv.imwrite(name, cv2_img)
+    #         self.last_photo = np.floor(self.ph)
+
+    # def cbDynamic(self, config, level):
+    #     spd = config.speed
+    #     ki = config.ki
+    #     kp = config.kp
+    #     kd = config.kd
+
+    #     if (spd != self.max_speed):
+    #         rospy.loginfo("New speed: %f", spd)
+    #         self.max_speed = spd
+        
+    #     if (ki != self.ki) or (kp != self.kp) or (kd != self.kd):
+    #         rospy.loginfo("New ki: %f\tNew kd: %f\tNew kp: %f", ki, kd, kp)
+    #         self.ki = ki
+    #         self.kd = kd
+    #         self.kp = kp
+        
+    #     return config
+    
+    def cbFollowLane(self, desired_center):
+
+        if not self.is_pub:
+            return
+
+
+        # if(self.start == 0):
+        #     twist = Twist()
+        #     twist.linear.x = 0
+        #     twist.linear.y = 0
+        #     twist.linear.z = 0
+        #     twist.angular.x = 0
+        #     twist.angular.y = 0
+        #     twist.angular.z = 0
+        #     #self.pub_cmd_vel.publish(twist) 
+        #     return
+        
+        center = desired_center.data
+
+        current_time = rospy.get_time()-116
+        dt = current_time - self.last_time
+        self.last_time = current_time
+
+        error = center - 500.
+        z = 0
+
+        # if(abs(error) < 1.):
+        #     speed = self.second_speed
+        #     #self.lastError = 0
+        #     self.integral = 0.0
+        #     z = 0.0
+        # else:
+        P = self.kp_angle * error
+        I = self.ki_angle * (self.past_integral + (error))
+        #self.inter += self.ki_angle * error
+        D = self.kd_angle * ((error - self.lastError))
+        angular_z = P + I + D
+
+        self.lastError = error
+        self.past_integral = error
+
+        speed = self.second_speed #min(abs(0.18 * ((1. - (abs(error) / 500)) ** 2)), 0.18)
+        z = -max(angular_z, -2.0) if angular_z < 0 else -min(angular_z, 2.0)
+    
+        #rospy.loginfo("speed: {} error: {}".format(speed, error))
+        #msg = "time: {}; center: {}; error: {}; speed: {}".format(current_time-116, center, error, speed)
+        #msg = "error: {}; speed: {}".format(error, speed)
+        #rospy.loginfo(msg)
+
+        #twist.linear.x = min(self.MAX_VEL * ((1 - abs(error) / 500) ** 2.2), 0.05)
+        self.twist.linear.x = speed
+        self.twist.angular.z = z
+        self.pub_cmd_vel.publish(self.twist)
+
+    def fnShutDown(self):
+        rospy.loginfo("Shutting down. cmd_vel will be 0")
+
+        twist = Twist()
+        twist.linear.x = 0
+        twist.linear.y = 0
+        twist.linear.z = 0
+        twist.angular.x = 0
+        twist.angular.y = 0
+        twist.angular.z = 0
+        #self.pub_cmd_vel.publish(twist) 
+
+    def main(self):
+        rospy.spin()
+
+if __name__ == '__main__':
+    rospy.init_node('control_lane')
+    node = ControlLane()
+    node.main()

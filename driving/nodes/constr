@@ -1,0 +1,104 @@
+#!/usr/bin/env python
+# Author: melovan
+
+import rospy
+import numpy as np
+import cv2 as cv
+from std_msgs.msg import Float64
+from geometry_msgs.msg import Twist
+from std_msgs.msg import String
+
+import actionlib
+from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
+from std_msgs.msg import UInt8
+
+
+class Constr():
+    def __init__(self):
+        self.pub_cmd_vel = rospy.Publisher('/constr/cmd_vel', Twist, queue_size = 1)
+        self.pub_finish = rospy.Publisher('/robot_finish', String, queue_size = 10)
+        self.pub_start= rospy.Publisher('/robot_start', UInt8, queue_size=1)
+
+        self.z = rospy.Publisher('/z', Float64, queue_size = 1)
+        self.time = rospy.Publisher('/time', Float64, queue_size = 1)
+
+        self.move_base = actionlib.SimpleActionClient("move_base", MoveBaseAction)
+
+        self.left = 0
+        self.right = 0
+        self.obstforw = 0
+        self.obstright = 0
+        self.obst = 1
+        self.miss = 0
+        self.flag = 1
+        self.twist = Twist()
+        self.start = 1
+
+        rospy.on_shutdown(self.fnShutDown)
+
+
+    def pub_velocity(self,x, z, time):
+        pub_vel = rospy.Publisher('cmd_vel', Twist, queue_size=1)
+        for i in range(0, int(time*10)):
+            self.twist.linear.x = x
+            self.twist.angular.z = z
+            pub_vel.publish(self.twist)
+            rospy.sleep(0.1)
+
+
+    def movebase_client(self,x,y,z,w):
+
+        #client = actionlib.SimpleActionClient('move_base',MoveBaseAction)
+        self.move_base.wait_for_server()
+
+        goal = MoveBaseGoal()
+        goal.target_pose.header.frame_id = "map"
+        goal.target_pose.header.stamp = rospy.Time.now()
+        goal.target_pose.pose.position.x = x
+        goal.target_pose.pose.position.y = y
+        goal.target_pose.pose.orientation.z = z
+        goal.target_pose.pose.orientation.w = w
+
+        self.move_base.send_goal(goal)
+        wait = self.move_base.wait_for_result()
+        if not wait:
+            rospy.logerr("Action server not available!")
+            rospy.signal_shutdown("Action server not available!")
+        else:
+            return self.move_base.get_result()
+
+
+    def fnShutDown(self):
+        rospy.loginfo("Shutting down constr")
+        self.move_base.cancel_goal()
+        
+
+    def main(self):
+        self.movebase_client(1.728, 0.424, .706, 0.706)
+        self.movebase_client(1.728, 0.73, 0.99, 0.21)
+        self.movebase_client(1.5043, 1, 0.706, 0.706)
+        self.movebase_client(1.77, 1.365, 0.706, 0.706)
+        self.movebase_client(1.49, 1.72, -1, 0)
+
+        # self.movebase_client(1.6941, 0.3428, 0.6261, 0.7796)
+        # self.movebase_client(1.7404, 0.6838, 0.9900, 0.2100)
+        # self.movebase_client(1.4920, 1.0059, 0.7120, 0.7020)
+        # self.movebase_client(1.7135, 1.5375, 0.7079, 0.7062)
+        #self.movebase_client(1.4560, 1.6950, 1, 0)
+
+        # self.movebase_client(1.728,0.424,.706,0.706)
+        # #self.movebase_client(1.6761, 0.3360, 0.4662, 0.8846)
+        # self.movebase_client(1.6398, 0.7565, 0.9622, 0.2720)
+        # self.movebase_client(1.5056, 1.0261, 0.7337, 0.6904)
+        # self.movebase_client(1.686, 1.243, 0.437, 0.898)
+        # self.movebase_client(1.7285, 1.5076, 0.7111, 0.7029)
+        # #self.movebase_client(1.49,1.73,-1,0.000001)
+        # self.movebase_client(1.4955, 1.6943, 0.9982, 0.0587)
+        #self.movebase_client(1.2287, 1.7433, 1, 0.00)
+        rospy.spin()     
+
+
+if __name__ == '__main__':
+    rospy.init_node('Constr')
+    node = Constr()
+    node.main()

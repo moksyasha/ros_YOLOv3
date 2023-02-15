@@ -1,0 +1,91 @@
+#!/usr/bin/env python
+# Author: moks
+
+import rospy
+
+from std_msgs.msg import Float64
+from geometry_msgs.msg import Twist
+from std_msgs.msg import Int8
+
+
+class Cross():
+    def __init__(self):
+        self.sub_lane = rospy.Subscriber('/control/lane', Float64, self.cbFollowLane, queue_size = 1)
+        # #self.sub_laser = rospy.Subscriber('/scan', LaserScan, self.cbLaser, queue_size = 1)
+        # self.sub_max_vel = rospy.Subscriber('/control/max_vel', Float64, self.cbGetMaxVel, queue_size = 1)
+        self.manager_cross = rospy.Subscriber('/manager_cross', Int8, self.cbIsPubCmd, queue_size = 1)
+        self.pub_cmd_vel = rospy.Publisher('/cmd_vel', Twist, queue_size = 1)
+
+        self.lastError = 0
+        self.twist = Twist()
+        self.past_integral = 0.0
+        self.max_speed = 0.420
+        self.mode = 5 # follow_lane doesnt work
+        self.counter = 10
+
+        self.ki_angle = 0.0007
+        self.kp_angle = 0.01
+        self.kd_angle = 0.001
+        self.inter = 0
+        rospy.on_shutdown(self.fnShutDown)
+
+
+    def cbIsPubCmd(self, pub_msg):
+        self.mode = pub_msg.data
+
+    
+    def cbFollowLane(self, desired_center):
+
+        if self.mode == 5:
+            return
+        elif self.counter:    # left turn
+            self.twist.linear.x = 0.2
+            self.twist.angular.z = 0.9
+            self.pub_cmd_vel.publish(self.twist)
+            self.counter -= 1
+            if not self.counter:
+                self.mode = 0 # default
+            return
+
+        center = desired_center.data
+
+        error = center - 500.
+        z = 0
+
+        P = self.kp_angle * error
+        #I = self.ki_angle * (self.past_integral + (error))
+            #self.inter += self.ki_angle * error
+        D = self.kd_angle * ((error - self.lastError))
+        angular_z = P + D
+
+        self.lastError = error
+        #self.past_integral = error
+
+        speed = 0.228
+        z = -max(angular_z, -2.0) if angular_z < 0 else -min(angular_z, 2.0)
+        
+        self.twist.linear.x = speed
+        self.twist.angular.z = z
+        self.pub_cmd_vel.publish(self.twist)
+
+
+    def fnShutDown(self):
+        rospy.loginfo("Cross_node shutting down")
+
+        twist = Twist()
+        twist.linear.x = 0
+        twist.linear.y = 0
+        twist.linear.z = 0
+        twist.angular.x = 0
+        twist.angular.y = 0
+        twist.angular.z = 0
+        #self.pub_cmd_vel.publish(twist) 
+
+    def main(self):
+        rospy.spin()
+
+
+if __name__ == '__main__':
+    rospy.init_node('cross_node')
+    node = Cross()
+    node.main()

@@ -1,0 +1,206 @@
+#!/usr/bin/env python
+# Author: moks
+
+import rospy
+import tf
+from std_msgs.msg import Float64
+from geometry_msgs.msg import Twist
+from std_msgs.msg import Int8
+from nav_msgs.msg import Odometry
+from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Empty
+
+
+class Parking():
+    def __init__(self):
+        self.start_pub = rospy.Publisher('/robot_start', Empty, queue_size = 1)
+        self.sub_lane = rospy.Subscriber('/detect/lane', Float64, self.cbFollowLane, queue_size = 1)
+        self.sub_laser = rospy.Subscriber('/scan', LaserScan, self.cbLaser, queue_size = 1)
+        # self.sub_max_vel = rospy.Subscriber('/control/max_vel', Float64, self.cbGetMaxVel, queue_size = 1)
+        self.manager_park = rospy.Subscriber('/manager_park', Int8, self.cbIsPubCmd, queue_size = 1)
+        self.pub_cmd_vel = rospy.Publisher('/cmd_vel', Twist, queue_size = 1)
+        self.sub_odom = rospy.Subscriber('/odom', Odometry, self.cbOdom, queue_size=1)
+        self.manager_control = rospy.Publisher('/manager_control', Int8, queue_size = 1)
+        self.pub_node_id = rospy.Publisher('/launch_id', Int8, queue_size = 1)
+        self.twist = Twist()
+
+        self.mode = 0
+
+        self.counter_left = 9
+        self.counter_little_forward = 12
+        self.counter_parking = 14
+
+        self.speed = 0.15
+        self.close = 0
+        self.calibration = 0
+        self.is_finished = 0
+        self.left_free = 0
+        self.park_on = 0
+        self.check_free_place = 0
+        self.check_distance = 0
+        self.correct_turn = 0.
+        self.lastError = 0.
+        self.follow_counter = 10
+        self.is_follow = 0
+        self.max_distance = 0.24
+        rospy.on_shutdown(self.fnShutDown)
+
+
+    def cbIsPubCmd(self, pub_msg):
+        self.mode = pub_msg.data
+
+
+    def euler_from_quaternion(self, quaternion):
+        theta = tf.transformations.euler_from_quaternion(quaternion)[2]
+        return theta
+
+
+    def cbOdom(self, odom_msg):
+        quaternion = (odom_msg.pose.pose.orientation.x, odom_msg.pose.pose.orientation.y, odom_msg.pose.pose.orientation.z, odom_msg.pose.pose.orientation.w)
+        self.current_theta = self.euler_from_quaternion(quaternion)
+        #rospy.loginfo("thetha: {}".format(self.current_theta))
+
+
+    def cbFollowLane(self, desired_center):
+        if self.is_follow:
+            rospy.loginfo("follow")
+            center = desired_center.data
+
+            error = center - 500.
+
+            P = 0.009 * error
+            D = 0.009 * ((error - self.lastError))
+            angular_z = P + D
+
+            self.lastError = error
+
+            self.twist.linear.x = 0.2
+            self.twist.angular.z = -max(angular_z, -2.0) if angular_z < 0 else -min(angular_z, 2.0)
+            self.pub_cmd_vel.publish(self.twist)
+
+
+    def cbLaser(self, laser_msg):
+        if self.mode:
+
+            if self.check_distance:                  
+                ranges = laser_msg.ranges[:40] + laser_msg.ranges[-40:]
+                if min(ranges) > self.max_distance:
+                    self.twist.linear.x = 0.02 + (self.twist.linear.x/1.2)
+                    self.twist.angular.z = 0
+                    self.pub_cmd_vel.publish(self.twist)
+                    self.check_distance = 1
+                else:
+                    self.check_distance -= 1
+                    self.twist.linear.x = 0
+                    self.twist.angular.z = 0
+                    self.pub_cmd_vel.publish(self.twist)
+                    self.calibration = 10
+                    self.correct_turn = 1.571
+                    self.close += 1
+                return
+
+            # parking on free place
+            if self.park_on and self.counter_parking:
+                self.twist.linear.x = 0.15
+                self.twist.angular.z = 1.21 * self.left_free
+                self.pub_cmd_vel.publish(self.twist)
+                self.counter_parking -= 1
+                return
+
+            # left turn on parking
+            if self.counter_left:
+                self.twist.linear.x = 0.2
+                self.twist.angular.z = 0.85
+                self.pub_cmd_vel.publish(self.twist)
+                self.counter_left -= 1
+                return
+
+            # on follow line PID
+            if self.follow_counter:
+                self.is_follow = 1
+                self.follow_counter -= 1
+                return
+
+            # off follow line PID
+            self.is_follow = 0
+
+            # little forward
+            if self.counter_little_forward:
+                self.twist.linear.x = self.speed
+                self.twist.angular.z = 0
+                self.pub_cmd_vel.publish(self.twist)
+                self.counter_little_forward -= 1
+                return
+
+            # check free place
+            if not self.check_free_place:                  
+                ranges = laser_msg.ranges[240:300]
+                if min(ranges) < 1:
+                    self.left_free = 1
+                else:
+                    self.left_free = -1
+                self.park_on = 1
+                self.check_free_place = 1
+                return
+
+            if self.calibration:
+                if self.close == 2:
+                    self.correct_turn = 3.14
+                self.twist.angular.z = self.correct_turn - self.current_theta
+                self.twist.linear.x = 0
+                self.pub_cmd_vel.publish(self.twist)
+                rospy.sleep(0.5)
+                rospy.loginfo("1thetha: {}  turn: {}".format(self.current_theta, self.twist.angular.z))
+                self.calibration -= 1
+                if not self.calibration:
+                    if self.close == 1:
+                        self.check_distance = 1
+                        self.max_distance = 0.18
+                        return
+                    elif self.close == 2:
+                        self.counter_little_forward = 12
+                        self.speed= 0.12
+                        return
+                    rospy.loginfo(f"Fin {self.current_theta}")
+                    self.twist.linear.x = 0
+                    self.twist.angular.z = 0
+                    self.pub_cmd_vel.publish(self.twist)
+                    rospy.loginfo("parking finished")
+                    self.check_distance = 1
+                return
+
+            if not self.is_finished:
+                self.is_finished = 1
+
+                if self.left_free == 1:
+                    self.correct_turn = 3.14
+                else:
+                    self.correct_turn = -0.
+
+                self.calibration = 7
+                return
+            
+            
+            self.twist.linear.x = 0
+            self.twist.angular.z = 0
+            self.pub_cmd_vel.publish(self.twist)
+            rospy.loginfo("ENDDDD")
+            rospy.sleep(1)
+            self.start_pub.publish()
+            self.manager_control.publish(2)
+            self.pub_node_id.publish(2)
+
+
+    def fnShutDown(self):
+        rospy.loginfo("Cross_node shutting down")
+
+
+    def main(self):
+        rospy.spin()
+
+
+if __name__ == '__main__':
+    rospy.init_node('park_node')
+    node = Parking()
+    node.main()
+
