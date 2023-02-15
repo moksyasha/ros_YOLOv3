@@ -1,3 +1,9 @@
+
+
+https://user-images.githubusercontent.com/80765148/219106097-d9e90557-1e36-406a-8a5d-6b7fb06fab36.mp4
+
+
+
 🥀 [turtlebot3 with YOLOv3](https://docs.google.com/presentation/d/1JYjwY6ZqBugkgnGPtoBkekLW7GFiUyNSOJXIAy_f5Uo/edit?usp=sharing)  🥀
 
 Metapackage for the turtlebot3 competition in the ROS system. The solution uses the YOLOv3 neural network. To run the metapackage, do the following:
